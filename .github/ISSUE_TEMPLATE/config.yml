@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/antonengelhardt/kicktipp-bot/discussions
+    about: Please use discussions for questions and general help
+

@@ -236,17 +236,17 @@ class GameDataExtractor:
                 
                 if quote_elements and len(quote_elements) >= 3:
                     pairs = []
-                    for idx, a in enumerate(quote_elements):
+                    for idx, quote_element in enumerate(quote_elements):
                         label_el = SeleniumUtils.safe_find_element(
-                            a, By.XPATH, './/span[contains(@class, "quote-label")]'
+                            quote_element, By.XPATH, './/span[contains(@class, "quote-label")]'
                         )
                         text_el = SeleniumUtils.safe_find_element(
-                            a, By.XPATH, './/span[contains(@class, "quote-text")]'
+                            quote_element, By.XPATH, './/span[contains(@class, "quote-text")]'
                         )
                         label = SeleniumUtils.safe_get_text(label_el, 'quote label') if label_el else None
                         value = SeleniumUtils.safe_get_text(text_el, 'quote text') if text_el else None
                         
-                        logger.debug(f"Quote anchor {idx}: label='{label}', value='{value}'")
+                        logger.debug(f"Quote element {idx}: label='{label}', value='{value}'")
                         
                         if label and value:
                             pairs.append((label.strip(), value.strip()))
@@ -257,7 +257,7 @@ class GameDataExtractor:
                         logger.debug(f"Quote mapping: {mapping}, ordered: {ordered}")
                         
                         if all(ordered) and len(ordered) == 3:
-                            logger.info(f"Successfully extracted quotes: {ordered}")
+                            logger.debug(f"Successfully extracted quotes: {ordered}")
                             return ordered
                         else:
                             logger.warning(f"Incomplete quote mapping: {mapping}")
@@ -286,7 +286,7 @@ class GameDataExtractor:
                         parts = None
 
                     if parts and len(parts) == 3:
-                        logger.info(f"Successfully extracted quotes (legacy): {parts}")
+                        logger.debug(f"Successfully extracted quotes (legacy): {parts}")
                         return parts
                     else:
                         logger.warning(f"Could not parse legacy quotes format: '{txt}'")
@@ -308,10 +308,12 @@ class GameDataExtractor:
         except Exception as e:
             logger.debug(f"Could not log link debug info: {e}")
 
-        logger.warning("Could not find quotes element in any supported format")
-        logger.warning("Possible causes:")
-        logger.warning("  - Quotes are not yet loaded (try increasing wait time)")
-        logger.warning("  - DNS/Firewall blocking quote provider (check Pi-hole or similar)")
-        logger.warning("  - Page structure has changed")
-        logger.warning("  - Network connectivity issues")
+        logger.warning(
+            "Could not find quotes element in any supported format\n"
+            "Possible causes:\n"
+            "  - Quotes are not yet loaded (try increasing wait time)\n"
+            "  - DNS/Firewall blocking quote provider (check Pi-hole or similar)\n"
+            "  - Page structure has changed\n"
+            "  - Network connectivity issues"
+        )
         return None

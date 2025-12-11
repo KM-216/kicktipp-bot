@@ -152,6 +152,14 @@ class TableRowProcessor:
 
 class GameDataExtractor:
     """Handles extraction of game-specific data from table rows."""
+    
+    # Constants for fallback column indices
+    FALLBACK_HOME_TEAM_COLUMN = 2
+    FALLBACK_AWAY_TEAM_COLUMN = 3
+    
+    # Constants for team name detection
+    MIN_TEAM_NAME_LENGTH = 3
+    MAX_TIME_TEXT_LENGTH = 20  # Max length for time/date text (e.g., "31.12.24 20:30")
 
     @staticmethod
     def extract_team_name(data_row, column_index: int, team_type: str) -> Optional[str]:
@@ -207,20 +215,21 @@ class GameDataExtractor:
                 
                 text = cell_text.strip()
                 
-                # Skip time cells (contain ":" or look like dates)
-                if ':' in text or (text.count('.') >= 2 and len(text) <= 20):
+                # Skip time cells (contain ":" or look like dates with multiple dots)
+                if ':' in text or (text.count('.') >= 2 and len(text) <= GameDataExtractor.MAX_TIME_TEXT_LENGTH):
                     continue
                 
                 # Skip cells that look like results (e.g., "2 : 1")
+                # Note: Handles both regular hyphen-minus (-) and Unicode minus (−) in scores
                 if re.match(r'^\d+\s*[:−-]\s*\d+$', text):
                     continue
                 
-                # Skip cells that are just numbers or formations (e.g., "1-4-1")
+                # Skip cells that are just numbers or formations (e.g., "1-4-1", "4-4-2")
                 if re.match(r'^[\d\-]+$', text):
                     continue
                 
                 # Skip very short text (likely not team names)
-                if len(text) < 3:
+                if len(text) < GameDataExtractor.MIN_TEAM_NAME_LENGTH:
                     continue
                 
                 # This looks like a potential team name
@@ -235,10 +244,12 @@ class GameDataExtractor:
                 logger.debug(f"Extracted teams: {home_team} vs {away_team}")
                 return (home_team, away_team)
             
-            # Strategy 3: Fallback to hardcoded positions (columns 2 and 3)
-            logger.debug("Using fallback extraction with hardcoded column indices")
-            home_team = GameDataExtractor.extract_team_name(data_row, 2, 'home')
-            away_team = GameDataExtractor.extract_team_name(data_row, 3, 'away')
+            # Strategy 3: Fallback to default column positions
+            logger.debug("Using fallback extraction with default column indices")
+            home_team = GameDataExtractor.extract_team_name(
+                data_row, GameDataExtractor.FALLBACK_HOME_TEAM_COLUMN, 'home')
+            away_team = GameDataExtractor.extract_team_name(
+                data_row, GameDataExtractor.FALLBACK_AWAY_TEAM_COLUMN, 'away')
             
             if home_team and away_team:
                 return (home_team, away_team)
@@ -275,10 +286,10 @@ class GameDataExtractor:
     def extract_quotes(game_row) -> Optional[list]:
         """
         Extract betting quotes in the order [1, X, 2].
-        Supports multiple DOM structures:
-        - New DOM with span elements (ad-free accounts): span.quote > span.quote-label + span.quote-text
-        - New DOM with anchor elements (accounts with ads): a.quote > span.quote-label + span.quote-text
-        - Legacy format: a.quote-link with text content
+        Supports multiple DOM structures (tried in order):
+        1. New DOM with anchor elements (accounts with ads - most common): a.quote > span.quote-label + span.quote-text
+        2. New DOM with span elements (ad-free accounts): span.quote > span.quote-label + span.quote-text
+        3. Legacy format: a.quote-link with text content
         
         Returns a list of 3 strings or None if not found.
         """
@@ -298,20 +309,20 @@ class GameDataExtractor:
                 )
 
             if container:
-                # First try: Look for span elements (ad-free accounts)
-                # Only select spans that have both quote-label and quote-text children
+                # First try: Look for anchor elements (accounts with ads - most common)
                 quote_elements = SeleniumUtils.safe_find_elements(
                     container,
                     By.XPATH,
-                    ".//span[contains(@class, 'quote')][span[contains(@class,'quote-label')] and span[contains(@class,'quote-text')]]"
+                    './/a[contains(@class, "quote")]'
                 )
                 
-                # Fallback: Look for anchor elements (accounts with ads)
+                # Fallback: Look for span elements (ad-free accounts)
+                # Only select spans that have both quote-label and quote-text children
                 if not quote_elements or len(quote_elements) < 3:
                     quote_elements = SeleniumUtils.safe_find_elements(
                         container,
                         By.XPATH,
-                        './/a[contains(@class, "quote")]'
+                        ".//span[contains(@class, 'quote')][span[contains(@class,'quote-label')] and span[contains(@class,'quote-text')]]"
                     )
                 
                 logger.debug(f"Found {len(quote_elements)} quote elements in container")

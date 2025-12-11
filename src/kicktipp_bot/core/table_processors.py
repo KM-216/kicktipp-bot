@@ -1,6 +1,7 @@
 """Table processing utilities for game tipping."""
 
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -165,6 +166,91 @@ class GameDataExtractor:
         return None
 
     @staticmethod
+    def extract_team_names_robust(data_row) -> Optional[tuple]:
+        """
+        Extract team names using a more robust approach that works with different table structures.
+        
+        Strategy:
+        1. Try to find team names using common class names and attributes
+        2. Look for td elements that contain team information
+        3. Fall back to positional extraction if needed
+        
+        Returns:
+            Tuple of (home_team, away_team) or None if extraction fails
+        """
+        try:
+            # Strategy 1: Look for td elements with team-related classes
+            # Common classes: 'heimteam', 'gastteam', 'team', etc.
+            all_cells = SeleniumUtils.safe_find_elements(data_row, By.TAG_NAME, 'td')
+            if not all_cells:
+                logger.warning("No table cells found in data row")
+                return None
+            
+            # Strategy 2: Find cells that likely contain team names
+            # Team names are usually text-heavy cells that are not:
+            # - Time cells (contain ":" or ".")
+            # - Input cells (contain input elements)
+            # - Quote cells (contain links or numbers)
+            # - Result cells (contain "-" between numbers)
+            potential_team_cells = []
+            
+            for idx, cell in enumerate(all_cells):
+                # Skip cells with input elements (these are tip fields)
+                inputs = SeleniumUtils.safe_find_elements(cell, By.TAG_NAME, 'input')
+                if inputs:
+                    continue
+                
+                # Get cell text
+                cell_text = SeleniumUtils.safe_get_text(cell, f'cell {idx}')
+                if not cell_text or not cell_text.strip():
+                    continue
+                
+                text = cell_text.strip()
+                
+                # Skip time cells (contain ":" or look like dates)
+                if ':' in text or (text.count('.') >= 2 and len(text) <= 20):
+                    continue
+                
+                # Skip cells that look like results (e.g., "2 : 1")
+                if re.match(r'^\d+\s*[:−-]\s*\d+$', text):
+                    continue
+                
+                # Skip cells that are just numbers or formations (e.g., "1-4-1")
+                if re.match(r'^[\d\-]+$', text):
+                    continue
+                
+                # Skip very short text (likely not team names)
+                if len(text) < 3:
+                    continue
+                
+                # This looks like a potential team name
+                potential_team_cells.append((idx, text))
+                logger.debug(f"Potential team cell {idx}: '{text}'")
+            
+            # We need at least 2 team cells (home and away)
+            if len(potential_team_cells) >= 2:
+                # Typically home team comes first, then away team
+                home_team = potential_team_cells[0][1]
+                away_team = potential_team_cells[1][1]
+                logger.debug(f"Extracted teams: {home_team} vs {away_team}")
+                return (home_team, away_team)
+            
+            # Strategy 3: Fallback to hardcoded positions (columns 2 and 3)
+            logger.debug("Using fallback extraction with hardcoded column indices")
+            home_team = GameDataExtractor.extract_team_name(data_row, 2, 'home')
+            away_team = GameDataExtractor.extract_team_name(data_row, 3, 'away')
+            
+            if home_team and away_team:
+                return (home_team, away_team)
+            
+            logger.warning("Could not extract team names using any strategy")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in robust team name extraction: {e}")
+            return None
+
+    @staticmethod
     def get_tip_fields(game_row) -> Optional[tuple]:
         """Get tip input fields directly from a game row element."""
         home_tip_field = SeleniumUtils.safe_find_element(
@@ -189,8 +275,11 @@ class GameDataExtractor:
     def extract_quotes(game_row) -> Optional[list]:
         """
         Extract betting quotes in the order [1, X, 2].
-        Supports both new DOM (div.tippabgabe-quoten > a.quote > spans)
-        and legacy format (a.quote-link).
+        Supports multiple DOM structures:
+        - New DOM with span elements (ad-free accounts): span.quote > span.quote-label + span.quote-text
+        - New DOM with anchor elements (accounts with ads): a.quote > span.quote-label + span.quote-text
+        - Legacy format: a.quote-link with text content
+        
         Returns a list of 3 strings or None if not found.
         """
         # --- New DOM structure ---
@@ -209,14 +298,27 @@ class GameDataExtractor:
                 )
 
             if container:
-                anchors = SeleniumUtils.safe_find_elements(
+                # First try: Look for span elements (ad-free accounts)
+                # Only select spans that have both quote-label and quote-text children
+                quote_elements = SeleniumUtils.safe_find_elements(
                     container,
                     By.XPATH,
-                    './/a[contains(@class, "quote")]'
+                    ".//span[contains(@class, 'quote')][span[contains(@class,'quote-label')] and span[contains(@class,'quote-text')]]"
                 )
-                if anchors and len(anchors) >= 3:
+                
+                # Fallback: Look for anchor elements (accounts with ads)
+                if not quote_elements or len(quote_elements) < 3:
+                    quote_elements = SeleniumUtils.safe_find_elements(
+                        container,
+                        By.XPATH,
+                        './/a[contains(@class, "quote")]'
+                    )
+                
+                logger.debug(f"Found {len(quote_elements)} quote elements in container")
+                
+                if quote_elements and len(quote_elements) >= 3:
                     pairs = []
-                    for a in anchors:
+                    for idx, a in enumerate(quote_elements):
                         label_el = SeleniumUtils.safe_find_element(
                             a, By.XPATH, './/span[contains(@class, "quote-label")]'
                         )
@@ -225,16 +327,25 @@ class GameDataExtractor:
                         )
                         label = SeleniumUtils.safe_get_text(label_el, 'quote label') if label_el else None
                         value = SeleniumUtils.safe_get_text(text_el, 'quote text') if text_el else None
+                        
+                        logger.debug(f"Quote anchor {idx}: label='{label}', value='{value}'")
+                        
                         if label and value:
                             pairs.append((label.strip(), value.strip()))
 
                     if pairs:
                         mapping = {lbl: val for (lbl, val) in pairs}
                         ordered = [mapping.get('1'), mapping.get('X'), mapping.get('2')]
+                        logger.debug(f"Quote mapping: {mapping}, ordered: {ordered}")
+                        
                         if all(ordered) and len(ordered) == 3:
+                            logger.info(f"Successfully extracted quotes: {ordered}")
                             return ordered
                         else:
                             logger.warning(f"Incomplete quote mapping: {mapping}")
+                            logger.warning("This may indicate that quotes are not fully loaded or DNS/firewall is blocking the quote provider")
+                else:
+                    logger.debug(f"Not enough quote elements found: {len(quote_elements) if quote_elements else 0}")
         except Exception as e:
             logger.warning(f"Error parsing quotes (new DOM): {e}")
 
@@ -245,6 +356,8 @@ class GameDataExtractor:
             )
             if quotes_element:
                 quotes_raw = SeleniumUtils.safe_get_text(quotes_element, 'quotes element')
+                logger.debug(f"Legacy quotes element text: '{quotes_raw}'")
+                
                 if quotes_raw:
                     txt = quotes_raw.replace("Quote: ", "").strip()
                     if " / " in txt:
@@ -255,11 +368,32 @@ class GameDataExtractor:
                         parts = None
 
                     if parts and len(parts) == 3:
+                        logger.info(f"Successfully extracted quotes (legacy): {parts}")
                         return parts
                     else:
-                        logger.warning(f"Could not parse legacy quotes format: {txt}")
+                        logger.warning(f"Could not parse legacy quotes format: '{txt}'")
+                        logger.warning("Expected format: '1.50 / 3.20 / 5.00' or '1.50 | 3.20 | 5.00'")
+                else:
+                    logger.warning("Legacy quotes element found but has no text content")
+                    logger.warning("This may indicate DNS/firewall blocking or quotes not yet loaded")
         except Exception as e:
             logger.warning(f"Error parsing quotes (legacy DOM): {e}")
 
+        # --- Additional debugging: check what's actually in the row ---
+        try:
+            all_links = SeleniumUtils.safe_find_elements(game_row, By.TAG_NAME, 'a')
+            logger.debug(f"Total links found in row: {len(all_links)}")
+            for idx, link in enumerate(all_links[:5]):  # Log first 5 links
+                link_text = SeleniumUtils.safe_get_text(link, f'link {idx}')
+                link_class = SeleniumUtils.safe_get_attribute(link, 'class', f'link {idx}')
+                logger.debug(f"Link {idx}: class='{link_class}', text='{link_text}'")
+        except Exception as e:
+            logger.debug(f"Could not log link debug info: {e}")
+
         logger.warning("Could not find quotes element in any supported format")
+        logger.warning("Possible causes:")
+        logger.warning("  - Quotes are not yet loaded (try increasing wait time)")
+        logger.warning("  - DNS/Firewall blocking quote provider (check Pi-hole or similar)")
+        logger.warning("  - Page structure has changed")
+        logger.warning("  - Network connectivity issues")
         return None

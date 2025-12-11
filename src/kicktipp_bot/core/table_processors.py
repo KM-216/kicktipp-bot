@@ -1,7 +1,6 @@
 """Table processing utilities for game tipping."""
 
 import logging
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -152,14 +151,6 @@ class TableRowProcessor:
 
 class GameDataExtractor:
     """Handles extraction of game-specific data from table rows."""
-    
-    # Constants for fallback column indices
-    FALLBACK_HOME_TEAM_COLUMN = 2
-    FALLBACK_AWAY_TEAM_COLUMN = 3
-    
-    # Constants for team name detection
-    MIN_TEAM_NAME_LENGTH = 3
-    MAX_TIME_TEXT_LENGTH = 20  # Max length for time/date text (e.g., "31.12.24 20:30")
 
     @staticmethod
     def extract_team_name(data_row, column_index: int, team_type: str) -> Optional[str]:
@@ -172,94 +163,6 @@ class GameDataExtractor:
             if team_name and team_name.strip():
                 return team_name.strip()
         return None
-
-    @staticmethod
-    def extract_team_names_robust(data_row) -> Optional[tuple]:
-        """
-        Extract team names using a more robust approach that works with different table structures.
-        
-        Strategy:
-        1. Try to find team names using common class names and attributes
-        2. Look for td elements that contain team information
-        3. Fall back to positional extraction if needed
-        
-        Returns:
-            Tuple of (home_team, away_team) or None if extraction fails
-        """
-        try:
-            # Strategy 1: Look for td elements with team-related classes
-            # Common classes: 'heimteam', 'gastteam', 'team', etc.
-            all_cells = SeleniumUtils.safe_find_elements(data_row, By.TAG_NAME, 'td')
-            if not all_cells:
-                logger.warning("No table cells found in data row")
-                return None
-            
-            # Strategy 2: Find cells that likely contain team names
-            # Team names are usually text-heavy cells that are not:
-            # - Time cells (contain ":" or ".")
-            # - Input cells (contain input elements)
-            # - Quote cells (contain links or numbers)
-            # - Result cells (contain "-" between numbers)
-            potential_team_cells = []
-            
-            for idx, cell in enumerate(all_cells):
-                # Skip cells with input elements (these are tip fields)
-                inputs = SeleniumUtils.safe_find_elements(cell, By.TAG_NAME, 'input')
-                if inputs:
-                    continue
-                
-                # Get cell text
-                cell_text = SeleniumUtils.safe_get_text(cell, f'cell {idx}')
-                if not cell_text or not cell_text.strip():
-                    continue
-                
-                text = cell_text.strip()
-                
-                # Skip time cells (contain ":" or look like dates with multiple dots)
-                if ':' in text or (text.count('.') >= 2 and len(text) <= GameDataExtractor.MAX_TIME_TEXT_LENGTH):
-                    continue
-                
-                # Skip cells that look like results (e.g., "2 : 1")
-                # Note: Handles both regular hyphen-minus (-) and Unicode minus (−) in scores
-                if re.match(r'^\d+\s*[:−-]\s*\d+$', text):
-                    continue
-                
-                # Skip cells that are just numbers or formations (e.g., "1-4-1", "4-4-2")
-                if re.match(r'^[\d\-]+$', text):
-                    continue
-                
-                # Skip very short text (likely not team names)
-                if len(text) < GameDataExtractor.MIN_TEAM_NAME_LENGTH:
-                    continue
-                
-                # This looks like a potential team name
-                potential_team_cells.append((idx, text))
-                logger.debug(f"Potential team cell {idx}: '{text}'")
-            
-            # We need at least 2 team cells (home and away)
-            if len(potential_team_cells) >= 2:
-                # Typically home team comes first, then away team
-                home_team = potential_team_cells[0][1]
-                away_team = potential_team_cells[1][1]
-                logger.debug(f"Extracted teams: {home_team} vs {away_team}")
-                return (home_team, away_team)
-            
-            # Strategy 3: Fallback to default column positions
-            logger.debug("Using fallback extraction with default column indices")
-            home_team = GameDataExtractor.extract_team_name(
-                data_row, GameDataExtractor.FALLBACK_HOME_TEAM_COLUMN, 'home')
-            away_team = GameDataExtractor.extract_team_name(
-                data_row, GameDataExtractor.FALLBACK_AWAY_TEAM_COLUMN, 'away')
-            
-            if home_team and away_team:
-                return (home_team, away_team)
-            
-            logger.warning("Could not extract team names using any strategy")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error in robust team name extraction: {e}")
-            return None
 
     @staticmethod
     def get_tip_fields(game_row) -> Optional[tuple]:

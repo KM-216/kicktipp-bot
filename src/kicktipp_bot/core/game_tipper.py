@@ -193,15 +193,16 @@ class GameTipper:
     def _process_datarow(self, game_number: int, data_row, game_time: datetime) -> bool:
         """Process a single game datarow."""
         try:
-            # Extract team names using robust extraction
-            team_names = GameDataExtractor.extract_team_names_robust(data_row)
-            
-            if not team_names:
+            # Extract team names using the extractor
+            home_team = GameDataExtractor.extract_team_name(
+                data_row, 2, 'home')
+            away_team = GameDataExtractor.extract_team_name(
+                data_row, 3, 'away')
+
+            if not home_team or not away_team:
                 logger.warning(
                     f"Could not extract team names for game {game_number}")
                 return False
-            
-            home_team, away_team = team_names
 
             logger.info(
                 f"Processing: {home_team} vs {away_team} | Time: {game_time.strftime('%d.%m.%y %H:%M')}")

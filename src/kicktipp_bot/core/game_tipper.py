@@ -193,7 +193,7 @@ class GameTipper:
     def _process_datarow(self, game_number: int, data_row, game_time: datetime) -> bool:
         """Process a single game datarow."""
         try:
-            # Extract team names using the new extractor
+            # Extract team names using the extractor
             home_team = GameDataExtractor.extract_team_name(
                 data_row, 2, 'home')
             away_team = GameDataExtractor.extract_team_name(

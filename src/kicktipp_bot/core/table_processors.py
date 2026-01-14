@@ -151,6 +151,10 @@ class TableRowProcessor:
 
 class GameDataExtractor:
     """Handles extraction of game-specific data from table rows."""
+    
+    # XPath selectors for quote extraction
+    XPATH_QUOTE_ANCHOR = './/a[contains(@class, "quote")]'
+    XPATH_QUOTE_SPAN = ".//span[contains(@class, 'quote')][span[contains(@class,'quote-label')] and span[contains(@class,'quote-text')]]"
 
     @staticmethod
     def extract_team_name(data_row, column_index: int, team_type: str) -> Optional[str]:
@@ -189,8 +193,11 @@ class GameDataExtractor:
     def extract_quotes(game_row) -> Optional[list]:
         """
         Extract betting quotes in the order [1, X, 2].
-        Supports both new DOM (div.tippabgabe-quoten > a.quote > spans)
-        and legacy format (a.quote-link).
+        Supports multiple DOM structures (tried in order):
+        1. New DOM with anchor elements (accounts with ads - most common): a.quote > span.quote-label + span.quote-text
+        2. New DOM with span elements (ad-free accounts): span.quote > span.quote-label + span.quote-text
+        3. Legacy format: a.quote-link with text content
+        
         Returns a list of 3 strings or None if not found.
         """
         # --- New DOM structure ---
@@ -209,32 +216,54 @@ class GameDataExtractor:
                 )
 
             if container:
-                anchors = SeleniumUtils.safe_find_elements(
+                # First try: Look for anchor elements (accounts with ads - most common)
+                quote_elements = SeleniumUtils.safe_find_elements(
                     container,
                     By.XPATH,
-                    './/a[contains(@class, "quote")]'
+                    GameDataExtractor.XPATH_QUOTE_ANCHOR
                 )
-                if anchors and len(anchors) >= 3:
+                
+                # Fallback: Look for span elements (ad-free accounts)
+                # Only select spans that have both quote-label and quote-text children
+                if not quote_elements or len(quote_elements) < 3:
+                    quote_elements = SeleniumUtils.safe_find_elements(
+                        container,
+                        By.XPATH,
+                        GameDataExtractor.XPATH_QUOTE_SPAN
+                    )
+                
+                logger.debug(f"Found {len(quote_elements)} quote elements in container")
+                
+                if quote_elements and len(quote_elements) >= 3:
                     pairs = []
-                    for a in anchors:
+                    for idx, quote_element in enumerate(quote_elements):
                         label_el = SeleniumUtils.safe_find_element(
-                            a, By.XPATH, './/span[contains(@class, "quote-label")]'
+                            quote_element, By.XPATH, './/span[contains(@class, "quote-label")]'
                         )
                         text_el = SeleniumUtils.safe_find_element(
-                            a, By.XPATH, './/span[contains(@class, "quote-text")]'
+                            quote_element, By.XPATH, './/span[contains(@class, "quote-text")]'
                         )
                         label = SeleniumUtils.safe_get_text(label_el, 'quote label') if label_el else None
                         value = SeleniumUtils.safe_get_text(text_el, 'quote text') if text_el else None
+                        
+                        logger.debug(f"Quote element {idx}: label='{label}', value='{value}'")
+                        
                         if label and value:
                             pairs.append((label.strip(), value.strip()))
 
                     if pairs:
                         mapping = {lbl: val for (lbl, val) in pairs}
                         ordered = [mapping.get('1'), mapping.get('X'), mapping.get('2')]
+                        logger.debug(f"Quote mapping: {mapping}, ordered: {ordered}")
+                        
                         if all(ordered) and len(ordered) == 3:
+                            logger.debug(f"Successfully extracted quotes: {ordered}")
                             return ordered
                         else:
                             logger.warning(f"Incomplete quote mapping: {mapping}")
+                            logger.warning("This may indicate that quotes are not fully loaded or DNS/firewall is blocking the quote provider")
+                else:
+                    logger.debug(f"Not enough quote elements found: {len(quote_elements) if quote_elements else 0}")
         except Exception as e:
             logger.warning(f"Error parsing quotes (new DOM): {e}")
 
@@ -245,6 +274,8 @@ class GameDataExtractor:
             )
             if quotes_element:
                 quotes_raw = SeleniumUtils.safe_get_text(quotes_element, 'quotes element')
+                logger.debug(f"Legacy quotes element text: '{quotes_raw}'")
+                
                 if quotes_raw:
                     txt = quotes_raw.replace("Quote: ", "").strip()
                     if " / " in txt:
@@ -255,11 +286,34 @@ class GameDataExtractor:
                         parts = None
 
                     if parts and len(parts) == 3:
+                        logger.debug(f"Successfully extracted quotes (legacy): {parts}")
                         return parts
                     else:
-                        logger.warning(f"Could not parse legacy quotes format: {txt}")
+                        logger.warning(f"Could not parse legacy quotes format: '{txt}'")
+                        logger.warning("Expected format: '1.50 / 3.20 / 5.00' or '1.50 | 3.20 | 5.00'")
+                else:
+                    logger.warning("Legacy quotes element found but has no text content")
+                    logger.warning("This may indicate DNS/firewall blocking or quotes not yet loaded")
         except Exception as e:
             logger.warning(f"Error parsing quotes (legacy DOM): {e}")
 
-        logger.warning("Could not find quotes element in any supported format")
+        # --- Additional debugging: check what's actually in the row ---
+        try:
+            all_links = SeleniumUtils.safe_find_elements(game_row, By.TAG_NAME, 'a')
+            logger.debug(f"Total links found in row: {len(all_links)}")
+            for idx, link in enumerate(all_links[:5]):  # Log first 5 links
+                link_text = SeleniumUtils.safe_get_text(link, f'link {idx}')
+                link_class = SeleniumUtils.safe_get_attribute(link, 'class', f'link {idx}')
+                logger.debug(f"Link {idx}: class='{link_class}', text='{link_text}'")
+        except Exception as e:
+            logger.debug(f"Could not log link debug info: {e}")
+
+        logger.warning(
+            "Could not find quotes element in any supported format\n"
+            "Possible causes:\n"
+            "  - Quotes are not yet loaded (try increasing wait time)\n"
+            "  - DNS/Firewall blocking quote provider (check Pi-hole or similar)\n"
+            "  - Page structure has changed\n"
+            "  - Network connectivity issues"
+        )
         return None

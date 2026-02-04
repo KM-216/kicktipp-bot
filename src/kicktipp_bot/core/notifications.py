@@ -234,8 +234,13 @@ class NotificationManager:
             title = f"{len(self.pending_events)} games tipped"
             message_parts = []
             for event in self.pending_events:
+                # Safely extract event data with defaults
+                home = event.get('home_team', 'Unknown')
+                away = event.get('away_team', 'Unknown')
+                tip = event.get('tip', [0, 0])
+                time = event.get('time', 'Unknown')
                 message_parts.append(
-                    f"{event['home_team']} - {event['away_team']}: {event['tip'][0]}:{event['tip'][1]} ({event['time']})"
+                    f"{home} - {away}: {tip[0]}:{tip[1]} ({time})"
                 )
             message = "\n".join(message_parts)
 

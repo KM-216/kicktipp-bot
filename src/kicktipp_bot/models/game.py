@@ -14,7 +14,7 @@ class Game:
     away_team: str
     quotes: List[str]
     game_time: datetime
-    _validated_quotes: List[float] = field(init=False, repr=False)
+    _validated_quotes: List[float] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate and process data after initialization."""

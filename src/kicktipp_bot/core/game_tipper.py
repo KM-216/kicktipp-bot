@@ -75,6 +75,10 @@ class GameTipper:
             # Submit all tips (button should always be clickable)
             self._submit_all_tips()
 
+            # Send grouped notifications if enabled
+            if Config.GROUP_NOTIFICATIONS:
+                self.notification_manager.send_grouped_notifications()
+
             # Debug mode sleep
             if self._is_debug_mode() and Config.RUN_EVERY_X_MINUTES != 0:
                 logger.info(

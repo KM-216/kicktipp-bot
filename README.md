@@ -59,6 +59,7 @@ or deploy with Kubernetes.
 | `NTFY_USERNAME`                | The username for your NTFY Webhook                                   | `username`                                                        | No       |
 | `NTFY_PASSWORD`                | The password for your NTFY Webhook                                   | `password`                                                        | No       |
 | `WEBHOOK_URL`                  | The URL of some generic webhook.                                     | `https://your-home-assistant-url.com/api/webhook/your-webhook-id` | No       |
+| `GROUP_NOTIFICATIONS`          | If set to `true`, all notifications are grouped into one webhook call at the end of each run. | `false`                                                           | No       |
 | `SENTRY_DSN`                   | The Sentry DSN for error reporting.                                  | `https://your-sentry-dsn.com`                                     | No       |
 | `SENTRY_ENVIRONMENT`           | The Sentry environment for error reporting.                          | `production`                                                      | No       |
 | `TZ`                           | The timezone for the container.                                      | `Europe/Berlin`                                                   | No       |

@@ -178,7 +178,16 @@ class NotificationManager:
             "quotes": quotes,
             "tip": list(tip),
             "time": game_time.strftime('%d.%m.%y %H:%M'),
-            "timestamp": game_time.isoformat()
+            "timestamp": game_time.isoformat(),
+            # Zapier-compatible fields
+            "date": game_time.isoformat(),
+            "team1": home_team,
+            "team2": away_team,
+            "quoteteam1": quotes[0] if len(quotes) > 0 else '',
+            "quotedraw": quotes[1] if len(quotes) > 1 else '',
+            "quoteteam2": quotes[2] if len(quotes) > 2 else '',
+            "tipteam1": tip[0],
+            "tipteam2": tip[1]
         }
         self.pending_events.append(event)
         logger.debug(f"Collected event for grouped notification: {home_team} vs {away_team}")

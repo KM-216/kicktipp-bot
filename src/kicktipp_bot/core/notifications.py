@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationManager:
-    """Manages different types of notifications for game tips."""
+    """Manages different types of notifications for game tips.
+    
+    Note: This class is not thread-safe. Each instance should be used for a single run only.
+    The pending_events list is cleared after sending grouped notifications.
+    """
 
     def __init__(self):
         self.zapier_enabled = Config.ZAPIER_URL is not None

@@ -37,7 +37,7 @@ class Config:
     NTFY_USERNAME: Optional[str] = os.getenv("NTFY_USERNAME")
     NTFY_PASSWORD: Optional[str] = os.getenv("NTFY_PASSWORD")
     WEBHOOK_URL: Optional[str] = os.getenv("WEBHOOK_URL")
-    GROUP_NOTIFICATIONS: Optional[bool] = os.getenv("GROUP_NOTIFICATIONS", "false").lower() == "true"
+    GROUP_NOTIFICATIONS: bool = os.getenv("GROUP_NOTIFICATIONS", "false").lower() == "true"
 
     @classmethod
     def validate_required_config(cls) -> bool:

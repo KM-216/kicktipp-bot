@@ -1,27 +1,26 @@
 """Game model for representing football matches and calculating betting tips."""
 
 import random
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Tuple, Union
 
 
+@dataclass
 class Game:
     """Represents a football game with teams, betting quotes, and tip calculation logic."""
 
-    def __init__(self, home_team: str, away_team: str, quotes: List[str], game_time: datetime):
-        """
-        Initialize a Game instance.
+    home_team: str
+    away_team: str
+    quotes: List[str]
+    game_time: datetime
+    _validated_quotes: List[float] = field(init=False, repr=False, compare=False)
 
-        Args:
-            home_team: Name of the home team
-            away_team: Name of the away team
-            quotes: List of betting quotes [home_win, draw, away_win]
-            game_time: DateTime when the game starts
-        """
-        self.home_team = home_team.strip()
-        self.away_team = away_team.strip()
-        self.quotes = self._validate_quotes(quotes)
-        self.game_time = game_time
+    def __post_init__(self):
+        """Validate and process data after initialization."""
+        self.home_team = self.home_team.strip()
+        self.away_team = self.away_team.strip()
+        self._validated_quotes = self._validate_quotes(self.quotes)
 
     def _validate_quotes(self, quotes: List[str]) -> List[float]:
         """
@@ -49,16 +48,16 @@ class Game:
         Calculate betting tip based on the quotes.
 
         Args:
-            home_quote: Quote for home team win (uses self.quotes[0] if None)
-            away_quote: Quote for away team win (uses self.quotes[2] if None)
+            home_quote: Quote for home team win (uses self._validated_quotes[0] if None)
+            away_quote: Quote for away team win (uses self._validated_quotes[2] if None)
 
         Returns:
             Tuple of (home_goals, away_goals) prediction
         """
         if home_quote is None:
-            home_quote = self.quotes[0]
+            home_quote = self._validated_quotes[0]
         if away_quote is None:
-            away_quote = self.quotes[2]
+            away_quote = self._validated_quotes[2]
 
         # Calculate quote difference (negative = home team more likely to win)
         quote_difference = home_quote - away_quote
@@ -90,8 +89,3 @@ class Game:
     def __str__(self) -> str:
         """String representation of the game."""
         return f"{self.home_team} vs {self.away_team} at {self.game_time.strftime('%d.%m.%y %H:%M')}"
-
-    def __repr__(self) -> str:
-        """Detailed string representation for debugging."""
-        return (f"Game(home_team='{self.home_team}', away_team='{self.away_team}', "
-                f"quotes={self.quotes}, game_time='{self.game_time}')")

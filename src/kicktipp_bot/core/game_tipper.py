@@ -87,6 +87,10 @@ class GameTipper:
             raise GameTippingError(f"WebDriver error during tipping: {e}")
         except Exception as e:
             raise GameTippingError(f"Unexpected error during tipping: {e}")
+        finally:
+            # Always send grouped notifications at the end, even if errors occurred
+            # This ensures collected events are sent and pending_events is cleared
+            self.notification_manager.send_grouped_notifications()
 
     def _reset_state(self) -> None:
         """Reset processing state for a new run."""

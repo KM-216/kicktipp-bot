@@ -29,28 +29,90 @@ def get_tips_from_claude(matches: list) -> list:
         for m in matches
     )
 
-    prompt = f"""Du bist ein Fußball-Experte. Tippe die folgenden WM-Spiele mit genauen Ergebnissen.
-Berücksichtige aktuelle Form, Stärke der Teams und WM-Dynamik.
+    prompt = f"""Du bist ein hochspezialisierter Fußball-Tipp-Experte für die WM 2026.
 
-Spiele:
+## Deine Aufgabe
+Tippe die folgenden Spiele mit genauen Ergebnissen (Heimtore : Gasttore).
+
+## Spiele
 {spiele_text}
 
-Antworte NUR mit einem JSON-Array, ohne Erklärungen und ohne Markdown-Backticks.
-Beispiel-Format:
+## Deine Analysestrategie (in dieser Reihenfolge)
+
+### 1. Aktuelle Nachrichten abrufen
+Suche für jedes Spiel nach:
+- Verletzungen und Sperren der Stammspieler (besonders Stürmer, Torhüter, Kapitäne)
+- Aktuellen Buchmacher-Quoten (Sieg/Unentschieden/Niederlage sowie Over/Under 2.5 Tore)
+- Form der letzten 3 Spiele beider Teams in dieser WM
+
+### 2. WM-Turnierkontext berücksichtigen
+- Analysiere den bisherigen Torschnitt dieser WM (viele Tore pro Spiel vs. wenige)
+- Beachte Muster: Welche Teams spielen offensiv, welche defensiv?
+- Gruppenphase vs. K.O.-Runde beeinflusst die Risikobereitschaft der Teams
+
+### 3. Tipp-Philosophie
+- Setze grundsätzlich auf den Favoriten
+- Bei klaren Favoriten: tippe einen deutlicheren Sieg (z.B. 2:0 oder 3:1 statt nur 1:0)
+- Riskiere kalkuliert wenn Quoten oder Form es rechtfertigen
+- Unentschieden nur tippen wenn es wirklich ausgeglichen ist
+
+### 4. Punktesystem-Optimierung
+Das Punktesystem lautet:
+- Nur Tendenz richtig (Sieg/Unentschieden): 2 Punkte
+- Tendenz + Tordifferenz richtig: 3 Punkte  
+- Genaues Ergebnis richtig: 4 Punkte
+- Bei Unentschieden: kein Tordifferenz-Bonus, nur Tendenz (2P) oder genaues Ergebnis (4P)
+
+Strategie daraus: Ein genaues Ergebnis bringt doppelt so viele Punkte wie nur die Tendenz.
+Lieber präzise tippen als zu vorsichtig sein. Bei Favoriten lohnt sich ein konkretes Ergebnis
+mehr als ein vorsichtiges 1:0.
+
+## Ausgabe
+Antworte NUR mit einem JSON-Array, ohne Erklärungen, ohne Markdown-Backticks.
+Format:
 [
-  {{"home": "Deutschland", "away": "Brasilien", "home_score": 2, "away_score": 1}}
-]"""
+  {{
+    "home": "Teamname genau wie oben",
+    "away": "Teamname genau wie oben", 
+    "home_score": 2,
+    "away_score": 0,
+    "confidence": "hoch",
+    "reasoning": "Kurze Begründung in einem Satz"
+  }}
+]
+
+Wichtig: Die Teamnamen müssen exakt mit den oben genannten übereinstimmen."""
 
     message = client.messages.create(
         model="claude-opus-4-5",
-        max_tokens=1024,
+        max_tokens=2048,
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}]
     )
 
-    raw = message.content[0].text.strip()
-    # Backticks entfernen falls Claude sie doch verwendet
-    raw = raw.replace("```json", "").replace("```", "").strip()
+    # Alle Text-Blöcke zusammenführen
+    raw = ""
+    for block in message.content:
+        if block.type == "text":
+            raw += block.text
+
+    raw = raw.strip().replace("```json", "").replace("```", "").strip()
+
+    # JSON extrahieren falls noch Text darum herum ist
+    start = raw.find("[")
+    end = raw.rfind("]") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+
     tips = json.loads(raw)
+
+    # Begründungen ausgeben
+    print("\n🤖 Claude's Tipps:")
+    for t in tips:
+        confidence = t.get("confidence", "?")
+        reasoning = t.get("reasoning", "")
+        print(f"   {t['home']} {t['home_score']}:{t['away_score']} {t['away']} [{confidence}] – {reasoning}")
+
     return tips
 
 
@@ -85,20 +147,42 @@ def get_open_matches(driver) -> list:
     driver.get(url)
     time.sleep(3)
 
-    matches = []
-    rows = driver.find_elements(By.CSS_SELECTOR, "table.tippabgabe tr.datarow")
-    print(f"   Gefundene Zeilen: {len(rows)}")
+    # HTML ausgeben für Debugging
+    page_source = driver.page_source
+    print(f"   Seitengröße: {len(page_source)} Zeichen")
 
-    for row in rows:
-        try:
-            home = row.find_element(By.CSS_SELECTOR, ".heimmannschaft").text.strip()
-            away = row.find_element(By.CSS_SELECTOR, ".gastmannschaft").text.strip()
-            inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text']")
-            if inputs and not inputs[0].get_attribute("value"):
-                matches.append({"home": home, "away": away, "row": row})
-                print(f"   + {home} vs {away}")
-        except Exception:
-            continue
+    matches = []
+
+    # Verschiedene Selektoren versuchen
+    selectors = [
+        ("table.tippabgabe tr.datarow", ".heimmannschaft", ".gastmannschaft"),
+        ("tr.datarow", ".heimmannschaft", ".gastmannschaft"),
+        ("table.ranking tr", "td:nth-child(2)", "td:nth-child(4)"),
+    ]
+
+    for row_sel, home_sel, away_sel in selectors:
+        rows = driver.find_elements(By.CSS_SELECTOR, row_sel)
+        if rows:
+            print(f"   Selektor '{row_sel}' gefunden: {len(rows)} Zeilen")
+            for row in rows:
+                try:
+                    home = row.find_element(By.CSS_SELECTOR, home_sel).text.strip()
+                    away = row.find_element(By.CSS_SELECTOR, away_sel).text.strip()
+                    inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text']")
+                    if home and away and inputs and not inputs[0].get_attribute("value"):
+                        matches.append({"home": home, "away": away, "row": row})
+                        print(f"   + {home} vs {away}")
+                except Exception:
+                    continue
+            if matches:
+                break
+
+    if not matches:
+        # Alle input-Felder auf der Seite ausgeben für Debugging
+        all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
+        print(f"   Gefundene input-Felder gesamt: {len(all_inputs)}")
+        all_rows = driver.find_elements(By.CSS_SELECTOR, "tr")
+        print(f"   Gefundene tr-Elemente gesamt: {len(all_rows)}")
 
     return matches
 
@@ -157,7 +241,7 @@ def main():
 
         matches = get_open_matches(driver)
         if not matches:
-            print("ℹ️  Keine offenen Spiele – fertig.")
+            print("ℹ️  Keine offenen Spiele gefunden.")
             return
 
         print(f"\n🤖 Frage Claude nach {len(matches)} Tipp(s)...")

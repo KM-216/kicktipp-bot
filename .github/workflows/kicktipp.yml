@@ -1,0 +1,38 @@
+name: Kicktipp Bot – tägliche Tipps
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  tippen:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Chrome installieren
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Python-Pakete installieren
+        run: pip install anthropic selenium webdriver-manager
+
+      - name: Claude-Tipper ausführen
+        env:
+          KICKTIPP_EMAIL: ${{ secrets.KICKTIPP_EMAIL }}
+          KICKTIPP_PASSWORD: ${{ secrets.KICKTIPP_PASSWORD }}
+          KICKTIPP_NAME_OF_COMPETITION: ${{ secrets.KICKTIPP_NAME_OF_COMPETITION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python claude_tipper.py

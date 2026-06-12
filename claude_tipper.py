@@ -16,107 +16,57 @@ PASSWORD    = os.environ["KICKTIPP_PASSWORD"]
 COMPETITION = os.environ["KICKTIPP_NAME_OF_COMPETITION"]
 API_KEY     = os.environ["ANTHROPIC_API_KEY"]
 
+WEB_SEARCH_TOOL = [{"type": "web_search_20250305", "name": "web_search"}]
 
-# ── Schritt 1: Claude nach Tipps fragen ───────────────────────────────────────
-def get_tips_from_claude(matches: list) -> list:
+
+# ── Claude: Spieltipps holen ──────────────────────────────────────────────────
+def get_tips_from_claude(matches):
     if not matches:
         return []
 
     client = anthropic.Anthropic(api_key=API_KEY)
+    spiele_text = "\n".join(f"- {m['home']} vs {m['away']}" for m in matches)
 
-    spiele_text = "\n".join(
-        f"- {m['home']} vs {m['away']}"
-        for m in matches
+    prompt = (
+        "Du bist ein Fußball-Tipp-Experte für die WM 2026.\n\n"
+        "## Spiele zum Tippen\n"
+        + spiele_text +
+        "\n\n## Deine Analysestrategie\n"
+        "1. Suche aktuelle Verletzungsnews und Sperren der Stammspieler\n"
+        "2. Suche aktuelle Buchmacher-Quoten für diese Spiele\n"
+        "3. Berücksichtige die bisherige WM-Performance der Teams\n"
+        "4. Beachte den bisherigen Torschnitt dieser WM\n"
+        "5. Setze grundsätzlich auf den Favoriten\n"
+        "6. Tippe präzise Ergebnisse - nicht nur 1:0\n\n"
+        "## Punktesystem\n"
+        "Genaues Ergebnis = 4 Punkte, Tordifferenz = 3 Punkte, Tendenz = 2 Punkte\n"
+        "Strategie: Lieber präzise tippen als zu vorsichtig sein!\n\n"
+        "## Ausgabe\n"
+        "NUR JSON-Array, keine Erklärungen, keine Backticks:\n"
+        '[{"home":"Teamname","away":"Teamname","home_score":2,"away_score":0,'
+        '"confidence":"hoch","reasoning":"Kurze Begruendung"}]'
     )
-
-    prompt = f"""Du bist ein hochspezialisierter Fußball-Tipp-Experte für die WM 2026.
-
-## Deine Aufgabe
-Tippe die folgenden Spiele mit genauen Ergebnissen (Heimtore : Gasttore).
-
-## Spiele
-{spiele_text}
-
-## Deine Analysestrategie (in dieser Reihenfolge)
-
-### 1. Aktuelle Nachrichten abrufen
-Suche für jedes Spiel nach:
-- Verletzungen und Sperren der Stammspieler (besonders Stürmer, Torhüter, Kapitäne)
-- Aktuellen Buchmacher-Quoten (Sieg/Unentschieden/Niederlage sowie Over/Under 2.5 Tore)
-- Form der letzten 3 Spiele beider Teams in dieser WM
-
-### 2. WM-Turnierkontext berücksichtigen
-- Analysiere den bisherigen Torschnitt dieser WM (viele Tore pro Spiel vs. wenige)
-- Beachte Muster: Welche Teams spielen offensiv, welche defensiv?
-- Gruppenphase vs. K.O.-Runde beeinflusst die Risikobereitschaft der Teams
-
-### 3. Tipp-Philosophie
-- Setze grundsätzlich auf den Favoriten
-- Bei klaren Favoriten: tippe einen deutlicheren Sieg (z.B. 2:0 oder 3:1 statt nur 1:0)
-- Riskiere kalkuliert wenn Quoten oder Form es rechtfertigen
-- Unentschieden nur tippen wenn es wirklich ausgeglichen ist
-
-### 4. Punktesystem-Optimierung
-Das Punktesystem lautet:
-- Nur Tendenz richtig (Sieg/Unentschieden): 2 Punkte
-- Tendenz + Tordifferenz richtig: 3 Punkte  
-- Genaues Ergebnis richtig: 4 Punkte
-- Bei Unentschieden: kein Tordifferenz-Bonus, nur Tendenz (2P) oder genaues Ergebnis (4P)
-
-Strategie daraus: Ein genaues Ergebnis bringt doppelt so viele Punkte wie nur die Tendenz.
-Lieber präzise tippen als zu vorsichtig sein. Bei Favoriten lohnt sich ein konkretes Ergebnis
-mehr als ein vorsichtiges 1:0.
-
-## Ausgabe
-Antworte NUR mit einem JSON-Array, ohne Erklärungen, ohne Markdown-Backticks.
-Format:
-[
-  {{
-    "home": "Teamname genau wie oben",
-    "away": "Teamname genau wie oben", 
-    "home_score": 2,
-    "away_score": 0,
-    "confidence": "hoch",
-    "reasoning": "Kurze Begründung in einem Satz"
-  }}
-]
-
-Wichtig: Die Teamnamen müssen exakt mit den oben genannten übereinstimmen."""
 
     message = client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        tools=WEB_SEARCH_TOOL,
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Alle Text-Blöcke zusammenführen
-    raw = ""
-    for block in message.content:
-        if block.type == "text":
-            raw += block.text
+    raw = "".join(b.text for b in message.content if b.type == "text").strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    start, end = raw.find("["), raw.rfind("]") + 1
+    tips = json.loads(raw[start:end])
 
-    raw = raw.strip().replace("```json", "").replace("```", "").strip()
-
-    # JSON extrahieren falls noch Text darum herum ist
-    start = raw.find("[")
-    end = raw.rfind("]") + 1
-    if start != -1 and end > start:
-        raw = raw[start:end]
-
-    tips = json.loads(raw)
-
-    # Begründungen ausgeben
     print("\n🤖 Claude's Tipps:")
     for t in tips:
-        confidence = t.get("confidence", "?")
-        reasoning = t.get("reasoning", "")
-        print(f"   {t['home']} {t['home_score']}:{t['away_score']} {t['away']} [{confidence}] – {reasoning}")
-
+        print(f"   {t['home']} {t['home_score']}:{t['away_score']} {t['away']}"
+              f" [{t.get('confidence','?')}] – {t.get('reasoning','')}")
     return tips
 
 
-# ── Schritt 2: Chrome starten ─────────────────────────────────────────────────
+# ── Chrome starten ────────────────────────────────────────────────────────────
 def create_driver():
     options = Options()
     options.add_argument("--headless=new")
@@ -124,13 +74,14 @@ def create_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=options)
+    return webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()), options=options
+    )
 
 
-# ── Schritt 3: Bei Kicktipp einloggen ─────────────────────────────────────────
+# ── Login ─────────────────────────────────────────────────────────────────────
 def login(driver):
-    print("🔑 Einloggen bei Kicktipp...")
+    print("🔑 Einloggen...")
     driver.get("https://www.kicktipp.de/info/profil/login")
     time.sleep(2)
     driver.find_element(By.NAME, "kennung").send_keys(EMAIL)
@@ -140,61 +91,42 @@ def login(driver):
     print("✓ Login erfolgreich")
 
 
-# ── Schritt 4: Offene Spiele auslesen ─────────────────────────────────────────
-def get_open_matches(driver) -> list:
+# ── Offene Spiele auslesen ────────────────────────────────────────────────────
+def get_open_matches(driver):
     url = f"https://www.kicktipp.de/{COMPETITION}/tippabgabe"
-    print(f"📋 Öffne: {url}")
+    print(f"\n📋 Öffne: {url}")
     driver.get(url)
     time.sleep(3)
 
-    # HTML ausgeben für Debugging
-    page_source = driver.page_source
-    print(f"   Seitengröße: {len(page_source)} Zeichen")
-
     matches = []
+    rows = driver.find_elements(
+        By.CSS_SELECTOR, "table#tippabgabeSpiele tr.datarow"
+    )
+    print(f"   Gefundene Zeilen: {len(rows)}")
 
-    # Verschiedene Selektoren versuchen
-    selectors = [
-        ("table.tippabgabe tr.datarow", ".heimmannschaft", ".gastmannschaft"),
-        ("tr.datarow", ".heimmannschaft", ".gastmannschaft"),
-        ("table.ranking tr", "td:nth-child(2)", "td:nth-child(4)"),
-    ]
+    for row in rows:
+        try:
+            # Heimteam in td.col1, Gastteam in td.col2
+            home = row.find_element(By.CSS_SELECTOR, "td.col1").text.strip()
+            away = row.find_element(By.CSS_SELECTOR, "td.col2").text.strip()
 
-    for row_sel, home_sel, away_sel in selectors:
-        rows = driver.find_elements(By.CSS_SELECTOR, row_sel)
-        if rows:
-            print(f"   Selektor '{row_sel}' gefunden: {len(rows)} Zeilen")
-            for row in rows:
-                try:
-                    home = row.find_element(By.CSS_SELECTOR, home_sel).text.strip()
-                    away = row.find_element(By.CSS_SELECTOR, away_sel).text.strip()
-                    inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text']")
-                    if home and away and inputs and not inputs[0].get_attribute("value"):
-                        matches.append({"home": home, "away": away, "row": row})
-                        print(f"   + {home} vs {away}")
-                except Exception:
-                    continue
-            if matches:
-                break
-
-    if not matches:
-        # Alle input-Felder auf der Seite ausgeben für Debugging
-        all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-        print(f"   Gefundene input-Felder gesamt: {len(all_inputs)}")
-        all_rows = driver.find_elements(By.CSS_SELECTOR, "tr")
-        print(f"   Gefundene tr-Elemente gesamt: {len(all_rows)}")
+            # Nur Spiele ohne bereits eingetragenen Tipp
+            inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text']")
+            if home and away and inputs and not inputs[0].get_attribute("value"):
+                matches.append({"home": home, "away": away, "row": row})
+                print(f"   + {home} vs {away}")
+        except Exception as e:
+            print(f"   ⚠️  Zeile übersprungen: {e}")
+            continue
 
     return matches
 
 
-# ── Schritt 5: Tipps eintragen ────────────────────────────────────────────────
-def enter_tips(driver, matches: list, tips: list) -> int:
-    tip_lookup = {
-        (t["home"].lower(), t["away"].lower()): t
-        for t in tips
-    }
-
+# ── Tipps eintragen ───────────────────────────────────────────────────────────
+def enter_tips(driver, matches, tips):
+    tip_lookup = {(t["home"].lower(), t["away"].lower()): t for t in tips}
     entered = 0
+
     for match in matches:
         key = (match["home"].lower(), match["away"].lower())
         tip = tip_lookup.get(key)
@@ -216,19 +148,30 @@ def enter_tips(driver, matches: list, tips: list) -> int:
     return entered
 
 
-# ── Schritt 6: Speichern ──────────────────────────────────────────────────────
+# ── Tipps speichern ───────────────────────────────────────────────────────────
 def submit_tips(driver):
+    print("\n💾 Speichere Tipps...")
     try:
+        # Kicktipp verwendet einen Submit-Button mit name="submitbutton"
         btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "input[type='submit'], button[type='submit']")
-            )
+            EC.element_to_be_clickable((By.NAME, "submitbutton"))
         )
         btn.click()
-        time.sleep(2)
-        print("✓ Tipps gespeichert!")
-    except Exception as e:
-        print(f"❌ Fehler beim Speichern: {e}")
+        time.sleep(3)
+        print("✓ Tipps erfolgreich gespeichert!")
+    except Exception:
+        # Fallback: generischer Submit-Button
+        try:
+            btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "input[type='submit'], button[type='submit']")
+                )
+            )
+            btn.click()
+            time.sleep(3)
+            print("✓ Tipps gespeichert (Fallback)!")
+        except Exception as e:
+            print(f"❌ Speichern fehlgeschlagen: {e}")
 
 
 # ── Hauptprogramm ─────────────────────────────────────────────────────────────
@@ -240,23 +183,30 @@ def main():
         login(driver)
 
         matches = get_open_matches(driver)
+
         if not matches:
-            print("ℹ️  Keine offenen Spiele gefunden.")
+            print("\nℹ️  Keine offenen Spiele gefunden.")
             return
 
-        print(f"\n🤖 Frage Claude nach {len(matches)} Tipp(s)...")
+        print(f"\n🤖 {len(matches)} Spiel(e) gefunden – frage Claude...")
         tips = get_tips_from_claude(matches)
-        print(f"   Claude-Tipps erhalten: {len(tips)}")
 
+        if not tips:
+            print("❌ Keine Tipps von Claude erhalten.")
+            return
+
+        print(f"\n✏️  Trage {len(tips)} Tipp(s) ein...")
         entered = enter_tips(driver, matches, tips)
-        print(f"\n✏️  {entered} Tipp(s) eingetragen")
+        print(f"   {entered} Tipp(s) eingetragen")
 
         if entered > 0:
             submit_tips(driver)
+        else:
+            print("⚠️  Nichts eingetragen, kein Speichern nötig.")
 
     finally:
         driver.quit()
-        print("✅ Bot beendet.")
+        print("\n✅ Bot beendet.")
 
 
 if __name__ == "__main__":

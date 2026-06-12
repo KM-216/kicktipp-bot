@@ -19,6 +19,38 @@ API_KEY     = os.environ["ANTHROPIC_API_KEY"]
 WEB_SEARCH_TOOL = [{"type": "web_search_20250305", "name": "web_search"}]
 
 
+# ── Cookie-Banner wegklicken ──────────────────────────────────────────────────
+def dismiss_cookie_banner(driver):
+    try:
+        # Warte kurz ob ein iframe erscheint
+        time.sleep(2)
+        iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[id*='sp_message']")
+        if iframes:
+            driver.switch_to.frame(iframes[0])
+            # "Alle akzeptieren" oder "Zustimmen" Button suchen
+            for selector in [
+                "button[title*='Akzeptieren']",
+                "button[title*='Accept']",
+                "button[title*='Zustimmen']",
+                "button.sp_choice_type_11",
+                "button.sp_choice_type_ACCEPT_ALL",
+            ]:
+                btns = driver.find_elements(By.CSS_SELECTOR, selector)
+                if btns:
+                    btns[0].click()
+                    print("✓ Cookie-Banner akzeptiert")
+                    driver.switch_to.default_content()
+                    time.sleep(1)
+                    return
+            driver.switch_to.default_content()
+    except Exception as e:
+        print(f"   (Cookie-Banner: {e})")
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+
+
 # ── Claude: Spieltipps holen ──────────────────────────────────────────────────
 def get_tips_from_claude(matches):
     if not matches:
@@ -33,16 +65,16 @@ def get_tips_from_claude(matches):
         + spiele_text +
         "\n\n## Deine Analysestrategie\n"
         "1. Suche aktuelle Verletzungsnews und Sperren der Stammspieler\n"
-        "2. Suche aktuelle Buchmacher-Quoten für diese Spiele\n"
-        "3. Berücksichtige die bisherige WM-Performance der Teams\n"
+        "2. Suche aktuelle Buchmacher-Quoten fuer diese Spiele\n"
+        "3. Beruecksichtige die bisherige WM-Performance der Teams\n"
         "4. Beachte den bisherigen Torschnitt dieser WM\n"
-        "5. Setze grundsätzlich auf den Favoriten\n"
-        "6. Tippe präzise Ergebnisse - nicht nur 1:0\n\n"
+        "5. Setze grundsaetzlich auf den Favoriten\n"
+        "6. Tippe praezise Ergebnisse - nicht nur 1:0\n\n"
         "## Punktesystem\n"
-        "Genaues Ergebnis = 4 Punkte, Tordifferenz = 3 Punkte, Tendenz = 2 Punkte\n"
-        "Strategie: Lieber präzise tippen als zu vorsichtig sein!\n\n"
+        "Genaues Ergebnis=4P, Tordifferenz=3P, Tendenz=2P\n"
+        "Strategie: Lieber praezise tippen als zu vorsichtig!\n\n"
         "## Ausgabe\n"
-        "NUR JSON-Array, keine Erklärungen, keine Backticks:\n"
+        "NUR JSON-Array, keine Erklaerungen, keine Backticks:\n"
         '[{"home":"Teamname","away":"Teamname","home_score":2,"away_score":0,'
         '"confidence":"hoch","reasoning":"Kurze Begruendung"}]'
     )
@@ -84,6 +116,7 @@ def login(driver):
     print("🔑 Einloggen...")
     driver.get("https://www.kicktipp.de/info/profil/login")
     time.sleep(2)
+    dismiss_cookie_banner(driver)
     driver.find_element(By.NAME, "kennung").send_keys(EMAIL)
     driver.find_element(By.NAME, "passwort").send_keys(PASSWORD)
     driver.find_element(By.NAME, "submitbutton").click()
@@ -97,6 +130,7 @@ def get_open_matches(driver):
     print(f"\n📋 Öffne: {url}")
     driver.get(url)
     time.sleep(3)
+    dismiss_cookie_banner(driver)
 
     matches = []
     rows = driver.find_elements(
@@ -106,11 +140,8 @@ def get_open_matches(driver):
 
     for row in rows:
         try:
-            # Heimteam in td.col1, Gastteam in td.col2
             home = row.find_element(By.CSS_SELECTOR, "td.col1").text.strip()
             away = row.find_element(By.CSS_SELECTOR, "td.col2").text.strip()
-
-            # Nur Spiele ohne bereits eingetragenen Tipp
             inputs = row.find_elements(By.CSS_SELECTOR, "input[type='text']")
             if home and away and inputs and not inputs[0].get_attribute("value"):
                 matches.append({"home": home, "away": away, "row": row})
@@ -148,42 +179,44 @@ def enter_tips(driver, matches, tips):
     return entered
 
 
-# ── Tipps speichern ───────────────────────────────────────────────────────────
+# ── Tipps speichern via JavaScript ────────────────────────────────────────────
 def submit_tips(driver):
     print("\n💾 Speichere Tipps...")
     try:
-        # Kicktipp verwendet einen Submit-Button mit name="submitbutton"
-        btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.NAME, "submitbutton"))
+        # Cookie-Banner nochmal wegräumen falls nötig
+        dismiss_cookie_banner(driver)
+
+        # Versuche Submit-Button per JavaScript zu klicken (umgeht iframe-Blocker)
+        driver.execute_script(
+            "document.querySelector('button[name=\"submitbutton\"],"
+            "input[name=\"submitbutton\"],"
+            "button[type=\"submit\"],"
+            "input[type=\"submit\"]').click();"
         )
-        btn.click()
         time.sleep(3)
         print("✓ Tipps erfolgreich gespeichert!")
-    except Exception:
-        # Fallback: generischer Submit-Button
+    except Exception as e:
+        print(f"❌ JavaScript-Klick fehlgeschlagen: {e}")
+        # Letzter Fallback: Form direkt absenden
         try:
-            btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "input[type='submit'], button[type='submit']")
-                )
+            driver.execute_script(
+                "document.getElementById('tippabgabeForm').submit();"
             )
-            btn.click()
             time.sleep(3)
-            print("✓ Tipps gespeichert (Fallback)!")
-        except Exception as e:
-            print(f"❌ Speichern fehlgeschlagen: {e}")
+            print("✓ Tipps gespeichert (Form-Submit)!")
+        except Exception as e2:
+            print(f"❌ Form-Submit fehlgeschlagen: {e2}")
 
 
 # ── Hauptprogramm ─────────────────────────────────────────────────────────────
 def main():
-    print("🚀 Kicktipp-Bot startet...")
+    print("🚀 Kicktipp-Bot v8 startet...")
     driver = create_driver()
 
     try:
         login(driver)
 
         matches = get_open_matches(driver)
-
         if not matches:
             print("\nℹ️  Keine offenen Spiele gefunden.")
             return
